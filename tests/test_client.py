@@ -157,13 +157,9 @@ class TestShotgunClient(base.MockTestBase):
         """User-Agent passed to server"""
         # test default user agent
         self.sg.info()
-        client_caps = self.sg.client_caps
         args, _ = self.sg._http_request.call_args
         (_, _, _, headers) = args
-        expected = "shotgun-json (%s); Python %s (%s)" % (api.__version__, 
-                                                          client_caps.py_version,
-                                                          client_caps.platform.capitalize()
-                                                          )
+        expected = "shotgun-json (%s)" % api.__version__
         self.assertEqual(expected, headers.get("user-agent"))
 
         # test adding to user agent
@@ -171,11 +167,7 @@ class TestShotgunClient(base.MockTestBase):
         self.sg.info()
         args, _ = self.sg._http_request.call_args
         (_, _, _, headers) = args
-        expected = "shotgun-json (%s); Python %s (%s); test-agent" % (
-                        api.__version__, 
-                        client_caps.py_version,
-                        client_caps.platform.capitalize()
-                        )
+        expected = "shotgun-json (%s); test-agent" % api.__version__
         self.assertEqual(expected, headers.get("user-agent"))
 
         # test resetting user agent
@@ -183,10 +175,7 @@ class TestShotgunClient(base.MockTestBase):
         self.sg.info()
         args, _ = self.sg._http_request.call_args
         (_, _, _, headers) = args
-        expected = "shotgun-json (%s); Python %s (%s)" % (api.__version__, 
-                                                          client_caps.py_version,
-                                                          client_caps.platform.capitalize(),
-                                                          )
+        expected = "shotgun-json (%s)" % api.__version__
         self.assertEqual(expected, headers.get("user-agent"))
 
     def test_connect_close(self):

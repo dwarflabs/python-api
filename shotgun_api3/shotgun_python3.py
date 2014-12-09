@@ -31,11 +31,11 @@
 
 
 import base64
-import cookielib    # used for attachment upload
-import cStringIO    # used for attachment upload
+from http import cookiejar    # used for attachment upload
+import io    # used for attachment upload
 import datetime
 import logging
-import mimetools    # used for attachment upload
+import email    # used for attachment upload
 import mimetypes    # used for attachment upload
 mimetypes.add_type('video/webm','.webm') # webm and mp4 seem to be missing
 mimetypes.add_type('video/mp4', '.mp4')  # from some OS/distros
@@ -46,16 +46,11 @@ import stat         # used for attachment upload
 import sys
 import time
 import types
-import urllib
-import urllib2      # used for image upload
-import urlparse
+import urllib     
 import shutil       # used for attachment download
 
-# use relative import for versions >=2.5 and package import for python versions <2.5
-if (sys.version_info[0] > 2) or (sys.version_info[0] == 2 and sys.version_info[1] >= 5):
-    from sg_25 import *
-else:
-    from sg_24 import *
+
+from . sg_30 import *
 
 LOG = logging.getLogger("shotgun_api3")
 LOG.setLevel(logging.WARN)
@@ -313,11 +308,11 @@ class Shotgun(object):
 
         self.base_url = (base_url or "").lower()
         self.config.scheme, self.config.server, api_base, _, _ = \
-            urlparse.urlsplit(self.base_url)
+            urllib.parse.urlsplit(self.base_url)
         if self.config.scheme not in ("http", "https"):
             raise ValueError("base_url must use http or https got '%s'" %
                 self.base_url)
-        self.config.api_path = urlparse.urljoin(urlparse.urljoin(
+        self.config.api_path = urllib.parse.urljoin(urllib.parse.urljoin(
             api_base or "/", self.config.api_ver + "/"), "json")
 
         self.reset_user_agent()
@@ -325,9 +320,9 @@ class Shotgun(object):
         # if the service contains user information strip it out
         # copied from the xmlrpclib which turned the user:password into
         # and auth header
-        auth, self.config.server = urllib.splituser(self.config.server)
+        auth, self.config.server = urllib.parse.splituser(self.config.server)
         if auth:
-            auth = base64.encodestring(urllib.unquote(auth))
+            auth = base64.encodestring(urllib.parse.unquote(auth))
             self.config.authorization = "Basic " + auth.strip()
 
         # foo:bar@123.456.789.012:3456
@@ -1024,7 +1019,7 @@ class Shotgun(object):
             "field_name" : field_name,
             "properties": [
                 {"property_name" : k, "value" : v}
-                for k, v in (properties or {}).iteritems()
+                for k, v in (properties or {}).items()
             ]
         }
 
@@ -1135,7 +1130,7 @@ class Shotgun(object):
 
         # Create opener with extended form post support
         opener = self._build_opener(FormPostHandler)
-        url = urlparse.urlunparse((self.config.scheme, self.config.server,
+        url = urllib.parse.urlunparse((self.config.scheme, self.config.server,
             "/upload/share_thumbnail", None, None, None))
 
         # Perform the request
@@ -1143,7 +1138,7 @@ class Shotgun(object):
             resp = opener.open(url, params)
             result = resp.read()
             # response headers are in str(resp.info()).splitlines()
-        except urllib2.HTTPError, e:
+        except urllib.request.HTTPError as e:
             if e.code == 500:
                 raise ShotgunError("Server encountered an internal error. "
                     "\n%s\n(%s)\n%s\n\n" % (url, params, e))
@@ -1212,14 +1207,14 @@ class Shotgun(object):
         params.update(self._auth_params())
 
         if is_thumbnail:
-            url = urlparse.urlunparse((self.config.scheme, self.config.server,
+            url = urllib.parse.urlunparse((self.config.scheme, self.config.server,
                 "/upload/publish_thumbnail", None, None, None))
             params["thumb_image"] = open(path, "rb")
             if field_name == "filmstrip_thumb_image":
                 params["filmstrip"] = True
 
         else:
-            url = urlparse.urlunparse((self.config.scheme, self.config.server,
+            url = urllib.parse.urlunparse((self.config.scheme, self.config.server,
                 "/upload/upload_file", None, None, None))
             if display_name is None:
                 display_name = os.path.basename(path)
@@ -1239,7 +1234,7 @@ class Shotgun(object):
         # Perform the request
         try:
             result = opener.open(url, params).read()
-        except urllib2.HTTPError, e:
+        except urllib.request.HTTPError as e:
             if e.code == 500:
                 raise ShotgunError("Server encountered an internal error. "
                     "\n%s\n(%s)\n%s\n\n" % (url, params, e))
@@ -1296,7 +1291,7 @@ class Shotgun(object):
         if file_path:
             try:
                 fp = open(file_path, 'wb')
-            except IOError, e:
+            except IOError as e:
                 raise IOError("Unable to write Attachment to disk using "\
                               "file_path. %s" % e) 
 
@@ -1309,16 +1304,16 @@ class Shotgun(object):
             self.set_up_auth_cookie()
    
         try:
-            request = urllib2.Request(url)
+            request = urllib.request.Request(url)
             request.add_header('user-agent', "; ".join(self._user_agents))
-            req = urllib2.urlopen(request)
+            req = urllib.request.urlopen(request)
             if file_path:
                 shutil.copyfileobj(req, fp)
             else:
                 attachment = req.read()
         # 400 [sg] Attachment id doesn't exist or is a local file
         # 403 [s3] link is invalid
-        except urllib2.URLError, e:
+        except urllib.request.URLError as e:
             if file_path:
                 fp.close()
             err = "Failed to open %s\n%s" % (url, e)
@@ -1354,9 +1349,9 @@ class Shotgun(object):
             self.config.server, False, False, "/", True, False, None, True,
             None, None, {})
         cj.set_cookie(c)
-        cookie_handler = urllib2.HTTPCookieProcessor(cj)
+        cookie_handler = urllib.request.HTTPCookieProcessor(cj)
         opener = self._build_opener(cookie_handler)
-        urllib2.install_opener(opener)
+        urllib.request.install_opener(opener)
 
     def get_attachment_download_url(self, attachment):
         """Returns the URL for downloading provided Attachment.
@@ -1394,8 +1389,8 @@ class Shotgun(object):
                 "dict, int, or NoneType. Instead got %s" % type(attachment))
 
         if attachment_id: 
-            url = urlparse.urlunparse((self.config.scheme, self.config.server,
-                "/file_serve/attachment/%s" % urllib.quote(str(attachment_id)),
+            url = urllib.parse.urlunparse((self.config.scheme, self.config.server,
+                "/file_serve/attachment/%s" % urllib.parse.quote(str(attachment_id)),
                 None, None, None))
         return url
 
@@ -1461,11 +1456,11 @@ class Shotgun(object):
             else:
                 auth_string = ""
             proxy_addr = "http://%s%s:%d" % (auth_string, self.config.proxy_server, self.config.proxy_port)
-            proxy_support = urllib2.ProxyHandler({self.config.scheme : proxy_addr})
+            proxy_support = urllib.request.ProxyHandler({self.config.scheme : proxy_addr})
 
-            opener = urllib2.build_opener(proxy_support, handler)
+            opener = urllib.request.build_opener(proxy_support, handler)
         else:
-            opener = urllib2.build_opener(handler)
+            opener = urllib.request.build_opener(handler)
         return opener
 
     # Deprecated methods from old wrapper
@@ -1483,7 +1478,6 @@ class Shotgun(object):
         supplied payload.
 
         """
-
         LOG.debug("Starting rpc call to %s with params %s" % (
             method, params))
 
@@ -1501,7 +1495,7 @@ class Shotgun(object):
         LOG.debug("Completed rpc call to %s" % (method))
         try:
             self._parse_http_status(http_status)
-        except ProtocolError, e:
+        except ProtocolError as e:
             e.headers = resp_headers
             # 403 is returned with custom error page when api access is blocked
             if e.errcode == 403:
@@ -1511,7 +1505,6 @@ class Shotgun(object):
         response = self._decode_response(resp_headers, body)
         self._response_errors(response)
         response = self._transform_inbound(response)
-
         if not isinstance(response, dict) or "results" not in response:
             return response
 
@@ -1581,9 +1574,7 @@ class Shotgun(object):
         """
 
         wire = json.dumps(payload, ensure_ascii=False)
-        if isinstance(wire, unicode):
-            return wire.encode("utf-8")
-        return wire
+        return wire.encode("utf-8")
 
     def _make_call(self, verb, path, body, headers):
         """Makes a HTTP call to the server, handles retry and failure.
@@ -1614,7 +1605,7 @@ class Shotgun(object):
     def _http_request(self, verb, path, body, headers):
         """Makes the actual HTTP request.
         """
-        url = urlparse.urlunparse((self.config.scheme, self.config.server,
+        url = urllib.parse.urlunparse((self.config.scheme, self.config.server,
             path, None, None, None))
         LOG.debug("Request is %s:%s" % (verb, url))
         LOG.debug("Request headers are %s" % headers)
@@ -1623,11 +1614,12 @@ class Shotgun(object):
         conn = self._get_connection()
         resp, content = conn.request(url, method=verb, body=body,
             headers=headers)
+        content = content.decode()
         #http response code is handled else where
         http_status = (resp.status, resp.reason)
         resp_headers = dict(
             (k.lower(), v)
-            for k, v in resp.iteritems()
+            for k, v in resp.items()
         )
         resp_body = content
 
@@ -1687,25 +1679,24 @@ class Shotgun(object):
         def _decode_list(lst):
             newlist = []
             for i in lst:
-                if isinstance(i, unicode):
-                    i = i.encode('utf-8')
-                elif isinstance(i, list):
+                if isinstance(i, list):
                     i = _decode_list(i)
+                #else :
+                #    i = i.encode('utf-8')
                 newlist.append(i)
             return newlist
 
         def _decode_dict(dct):
             newdict = {}
-            for k, v in dct.iteritems():
-                if isinstance(k, unicode):
-                    k = k.encode('utf-8')
-                if isinstance(v, unicode):
-                    v = v.encode('utf-8')
-                elif isinstance(v, list):
+            for k, v in dct.items():
+                #k = k.encode('utf-8')
+                if isinstance(v, list):
                     v = _decode_list(v)
+                #else :
+                #    v = v.encode('utf-8')
                 newdict[k] = v
             return newdict
-        return json.loads(body, object_hook=_decode_dict)
+        return json.loads(str(body), object_hook=_decode_dict)
 
 
     def _response_errors(self, sg_response):
@@ -1735,7 +1726,7 @@ class Shotgun(object):
         if isinstance(data, dict):
             return dict(
                 (k, recursive(v, visitor))
-                for k, v in data.iteritems()
+                for k, v in data.items()
             )
 
         return visitor(data)
@@ -1780,7 +1771,7 @@ class Shotgun(object):
 
             if isinstance(value, str):
                 # Convert strings to unicode
-                return value.decode("utf-8")
+                return value
 
             return value
 
@@ -1799,7 +1790,7 @@ class Shotgun(object):
             _change_tz = None
 
         def _inbound_visitor(value):
-            if isinstance(value, basestring):
+            if isinstance(value, str):
                 if len(value) == 20 and self._DATE_TIME_PATTERN.match(value):
                     try:
                         # strptime was not on datetime in python2.4
@@ -1878,12 +1869,12 @@ class Shotgun(object):
                 continue
 
             # iterate over each item and check each field for possible injection
-            for k, v in rec.iteritems():
+            for k, v in rec.items():
                 if not v:
                     continue
 
                 # Check for html entities in strings
-                if isinstance(v, types.StringTypes):
+                if isinstance(v, str):
                     rec[k] = rec[k].replace('&lt;', '<')
 
                 # check for thumbnail for older version (<3.3.0) of shotgun
@@ -1918,8 +1909,8 @@ class Shotgun(object):
         # curl "https://foo.com/upload/get_thumbnail_url?entity_type=Version&entity_id=1"
         # 1
         # /files/0000/0000/0012/232/shot_thumb.jpg.jpg
-        entity_info = {'e_type':urllib.quote(entity_type),
-                       'e_id':urllib.quote(str(entity_id))}
+        entity_info = {'e_type':urllib.parse.quote(entity_type),
+                       'e_id':urllib.parse.quote(str(entity_id))}
         url = ("/upload/get_thumbnail_url?" +
                 "entity_type=%(e_type)s&entity_id=%(e_id)s" % entity_info)
 
@@ -1933,7 +1924,7 @@ class Shotgun(object):
             raise ShotgunError(thumb_url)
 
         if code == 1:
-            return urlparse.urlunparse((self.config.scheme,
+            return urllib.parse.urlunparse((self.config.scheme,
                 self.config.server, thumb_url.strip(), None, None, None))
 
         # Comments in prev version said we can get this sometimes.
@@ -1948,22 +1939,22 @@ class Shotgun(object):
 
         return [
             {key_name : k, value_name : v }
-            for k, v in (d or {}).iteritems()
+            for k, v in (d or {}).items()
         ]
 
 
 # Helpers from the previous API, left as is.
 
 # Based on http://code.activestate.com/recipes/146306/
-class FormPostHandler(urllib2.BaseHandler):
+class FormPostHandler(urllib.request.BaseHandler):
     """
     Handler for multipart form data
     """
-    handler_order = urllib2.HTTPHandler.handler_order - 10 # needs to run first
+    handler_order = urllib.request.HTTPHandler.handler_order - 10 # needs to run first
 
     def http_request(self, request):
         data = request.get_data()
-        if data is not None and not isinstance(data, basestring):
+        if data is not None and not isinstance(data, str):
             files = []
             params = []
             for key, value in data.items():
@@ -1972,7 +1963,7 @@ class FormPostHandler(urllib2.BaseHandler):
                 else:
                     params.append((key, value))
             if not files:
-                data = urllib.urlencode(params, True) # sequencing on
+                data = urllib.parse.urlencode(params, True) # sequencing on
             else:
                 boundary, data = self.encode(params, files)
                 content_type = 'multipart/form-data; boundary=%s' % boundary
@@ -1982,9 +1973,9 @@ class FormPostHandler(urllib2.BaseHandler):
 
     def encode(self, params, files, boundary=None, buffer=None):
         if boundary is None:
-            boundary = mimetools.choose_boundary()
+            boundary = email.choose_boundary()
         if buffer is None:
-            buffer = cStringIO.StringIO()
+            buffer = io.StringIO()
         for (key, value) in params:
             buffer.write('--%s\r\n' % boundary)
             buffer.write('Content-Disposition: form-data; name="%s"' % key)

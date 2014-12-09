@@ -2,12 +2,14 @@
 
 Shotgun provides a simple Python-based API for accessing Shotgun and integrating with other tools. This is the official API that is maintained by Shotgun Software (support@shotgunsoftware.com)
 
-The latest version can always be found at http://github.com/shotgunsoftware/python-api
+## New Home
+
+[GitHub is the new official location](http://github.com/shotgunsoftware/python-api) for the latest Shotgun Python API. We will no longer be including it in our code tree that is deployed to your servers or posting it for download from our support site. So update your bookmarks!
 
 ## Minimum Requirements
 
 * Shotgun server v2.4.12 or higher. (Earlier builds of 2.4 will work, but have buggy support for float field types)
-* Python v2.4 - v2.7.
+* Python v2.4 - v2.7. (We do have plans to eventually support Python 3)
 
 ## High Performance Requirements
 
@@ -32,6 +34,7 @@ To install a specific version of the package with `pip` (recommended), run the f
 If you're using pip with `requirements.txt`, add the following line:  
 `git+git://github.com/shotgunsoftware/python-api.git`
 
+
 ## Documentation
 Tutorials and detailed documentation about the Python API are available on the [Python API Wiki](https://github.com/shotgunsoftware/python-api/wiki). There is also some additional related documentation on the [Shotgun Support Website](https://support.shotgunsoftware.com/forums/48807-developer-api-info).
 Some useful direct links in each are below:
@@ -53,26 +56,18 @@ Integration and unit tests are provided.
 
 ## Changelog
 
-**v3.0.17 - 2014 Jul 10**
-
-   + Add ability to update last_accessed_by_current_user on Project.
-   + Add workaround for bug in Python 2.7 mimetypes library on Windows (http://bugs.python.org/issue9291)
-   + Add platform and Python version to user-agent (eg. "shotgun-json (3.0.17); Python 2.7 (Mac)")
-
 **v3.0.16 - 2014 May 23**
+    + Add flag to ignore entities from archived projects.
+    + Add support for differentiating between zero and None for number fields.
+    + Add ability to act as a different user.
 
-   + Add flag to ignore entities from archived projects.
-   + Add support for differentiating between zero and None for number fields.
-   + Add ability to act as a different user.
-
-**v3.0.15 - 2014 Mar 6**
-
+**v3.0.15 - 2014 March 6**
    + Fixed bug which allowed a value of None for password parameter in authenticate_human_user
    + Add  follow, unfollow and followers methods
    + Added ability to login as human user
    + Ensure that webm/mp4 mime types are always available
    + Updated link to video tour in README
-   + Fixes and updates to various tests
+   + Fixes and update to various tests
 
 **v3.0.14 - 2013 Jun 26**
 
