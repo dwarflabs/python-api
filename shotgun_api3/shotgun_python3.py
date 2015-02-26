@@ -36,6 +36,7 @@ import io    # used for attachment upload
 import datetime
 import logging
 import email    # used for attachment upload
+import email.generator    # used for attachment upload
 import mimetypes    # used for attachment upload
 mimetypes.add_type('video/webm','.webm') # webm and mp4 seem to be missing
 mimetypes.add_type('video/mp4', '.mp4')  # from some OS/distros
@@ -1953,12 +1954,12 @@ class FormPostHandler(urllib.request.BaseHandler):
     handler_order = urllib.request.HTTPHandler.handler_order - 10 # needs to run first
 
     def http_request(self, request):
-        data = request.get_data()
+        data = request.data
         if data is not None and not isinstance(data, str):
             files = []
             params = []
             for key, value in data.items():
-                if isinstance(value, file):
+                if (hasattr(value, 'read') and hasattr(value, 'write')):#if isinstance(value, file):
                     files.append((key, value))
                 else:
                     params.append((key, value))
@@ -1968,12 +1969,12 @@ class FormPostHandler(urllib.request.BaseHandler):
                 boundary, data = self.encode(params, files)
                 content_type = 'multipart/form-data; boundary=%s' % boundary
                 request.add_unredirected_header('Content-Type', content_type)
-            request.add_data(data)
+            request.data=data
         return request
 
     def encode(self, params, files, boundary=None, buffer=None):
         if boundary is None:
-            boundary = email.choose_boundary()
+            boundary = email.generator._make_boundary()
         if buffer is None:
             buffer = io.StringIO()
         for (key, value) in params:
