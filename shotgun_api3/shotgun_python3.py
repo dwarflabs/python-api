@@ -35,6 +35,7 @@ from http import cookiejar    # used for attachment upload
 import io    # used for attachment upload
 import datetime
 import logging
+import http.cookiejar as cookielib
 import email    # used for attachment upload
 import email.generator    # used for attachment upload
 import mimetypes    # used for attachment upload
@@ -49,6 +50,7 @@ import time
 import types
 import urllib     
 import shutil       # used for attachment download
+import traceback
 
 
 from . sg_30 import *
@@ -1243,12 +1245,13 @@ class Shotgun(object):
                 raise ShotgunError("Unanticipated error occurred uploading "
                     "%s: %s" % (path, e))
         else:
-            if not str(result).startswith("1"):
+            print("Result: ", [result])
+            if not result.decode().startswith("1"):
                 raise ShotgunError("Could not upload file successfully, but "\
                     "not sure why.\nPath: %s\nUrl: %s\nError: %s" % (
                     path, url, str(result)))
 
-        attachment_id = int(str(result).split(":")[1].split("\n")[0])
+        attachment_id = int(result.decode().split(":")[1].split("\n")[0])
         return attachment_id
 
     def download_attachment(self, attachment=False, file_path=None, 
@@ -1973,6 +1976,7 @@ class FormPostHandler(urllib.request.BaseHandler):
         return request
 
     def encode(self, params, files, boundary=None, buffer=None):
+        print("==========ENCODE================")
         if boundary is None:
             boundary = email.generator._make_boundary()
         if buffer is None:
@@ -1984,6 +1988,7 @@ class FormPostHandler(urllib.request.BaseHandler):
         for (key, fd) in files:
             filename = fd.name.split('/')[-1]
             content_type = mimetypes.guess_type(filename)[0]
+            print("    Content-Type", content_type)
             content_type = content_type or 'application/octet-stream'
             file_size = os.fstat(fd.fileno())[stat.ST_SIZE]
             buffer.write('--%s\r\n' % boundary)
@@ -1995,7 +2000,8 @@ class FormPostHandler(urllib.request.BaseHandler):
             fd.seek(0)
             buffer.write('\r\n%s\r\n' % fd.read())
         buffer.write('--%s--\r\n\r\n' % boundary)
-        buffer = buffer.getvalue()
+        buffer = buffer.getvalue().encode('utf-8')
+        print(boundary, buffer.decode()[:1000])
         return boundary, buffer
 
     def https_request(self, request):
