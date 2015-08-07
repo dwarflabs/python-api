@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import sys
-from setuptools import setup, find_packages
+from distutils.core import setup
 
 f = open('README')
 readme = f.read().strip()
@@ -24,7 +24,7 @@ setup(
     author_email='support@shotgunsoftware.com',
     url='https://github.com/shotgunsoftware/python-api',
     license=license,
-    packages=find_packages(exclude=('tests',)),
+    packages=['shotgun_api3', 'shotgun_api3.lib', 'shotgun_api3.lib.httplib2', 'shotgun_api3.lib.httplib3', 'shotgun_api3.lib.httplibtest', 'shotgun_api3.lib.simplejson'],
     script_args=script_args,
     include_package_data=True,
     package_data={'': [ 'cacerts.txt']},

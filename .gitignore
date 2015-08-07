@@ -1,21 +1,45 @@
-#python specific
-*.pyc
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
 
-## generic files to ignore
-*~
-*.lock
-*.DS_Store
-*.swp
-*.out
-*.bak
+# C extensions
+*.so
 
-# test related
-tests/config
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+eggs/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+.tox/
 .coverage
-.cache
-htmlcov
+nosetests.xml
+coverage.xml
 
-# setup related
-build
-dist
-shotgun_api3.egg-info
+# Translations
+*.mo
+
+# Mr Developer
+.mr.developer.cfg
+
+# Django stuff:
+*.log
+*.pot
+
+
+*~
+
+htmlcov/
+
