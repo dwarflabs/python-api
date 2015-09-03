@@ -1196,6 +1196,7 @@ class Shotgun(object):
 
         :returns: Id of the new attachment.
         """
+        raise NotImplementedError("Please use python 2 to upload a movie on Shotgun")
         path = os.path.abspath(os.path.expanduser(path or ""))
         if not os.path.isfile(path):
             raise ShotgunError("Path must be a valid file, got '%s'" % path)
