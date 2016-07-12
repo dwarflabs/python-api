@@ -2,7 +2,6 @@ import sys
 import os
 import logging
 
-<<<<<<< HEAD:shotgun_api3/sg_30.py
 from .lib.httplib3 import Http, ProxyInfo, socks, SSLHandshakeError
 from .lib.sgtimezone import SgTimezone
 from xmlrpc.client import Error, ProtocolError, ResponseError

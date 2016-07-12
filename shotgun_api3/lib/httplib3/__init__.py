@@ -96,7 +96,15 @@ class UnimplementedHmacDigestAuthOptionError(HttpLib2ErrorWithResponse): pass
 class MalformedHeader(HttpLib2Error): pass
 class RelativeURIError(HttpLib2Error): pass
 class ServerNotFoundError(HttpLib2Error): pass
-class CertificateValidationUnsupportedInPython31(HttpLib2Error): pass
+class ProxiesUnavailableError(HttpLib2Error): pass
+class CertificateValidationUnsupported(HttpLib2Error): pass
+class SSLHandshakeError(HttpLib2Error): pass
+class NotSupportedOnThisPlatform(HttpLib2Error): pass
+class CertificateHostnameMismatch(SSLHandshakeError):
+    def __init__(self, desc, host, cert):
+        HttpLib2Error.__init__(self, desc)
+        self.host = host
+        self.cert = cert
 
 # Open Items:
 # -----------

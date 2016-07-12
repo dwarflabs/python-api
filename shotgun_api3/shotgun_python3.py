@@ -211,6 +211,14 @@ class ClientCapabilities(object):
             self.local_path_field = None
 
         self.py_version = ".".join(str(x) for x in sys.version_info[:2])
+        
+        # extract the OpenSSL version if we can. The version is only available in Python 2.7 and
+        # only if we successfully imported ssl
+        self.ssl_version = "unknown"
+        try:
+            self.ssl_version = ssl.OPENSSL_VERSION
+        except (AttributeError, NameError):
+            pass
 
     def __str__(self):
         return "ClientCapabilities: platform %s, local_path_field %s, "\
@@ -236,6 +244,8 @@ class _Config(object):
         self.user_password = None
         self.auth_token = None
         self.sudo_as_login = None
+        # Authentication parameters to be folded into final auth_params dict
+        self.extra_auth_params = None
         # uuid as a string
         self.session_uuid = None
         self.scheme = None
@@ -278,7 +288,7 @@ class Shotgun(object):
                  http_proxy=None,
                  ensure_ascii=True,
                  connect=True,
-				 ca_certs=None,
+                 ca_certs=None,
                  login=None,
                  password=None,
                  sudo_as_login=None,
@@ -306,9 +316,9 @@ class Shotgun(object):
         form [username:pass@]proxy.com[:8080]
 
         :param connect: If True, connect to the server. Only used for testing.
-		
-		:param ca_certs: The path to the SSL certificate file. Useful for users
-		who would like to package their application into an executable.
+        
+        :param ca_certs: The path to the SSL certificate file. Useful for users
+        who would like to package their application into an executable.
 
         :param login: The login to use to authenticate to the server. If login
         is provided, then password must be as well and neither script_name nor
@@ -1344,7 +1354,7 @@ class Shotgun(object):
             resp = opener.open(url, params)
             result = resp.read()
             # response headers are in str(resp.info()).splitlines()
-        except urllib2.HTTPError, e:
+        except urllib2.HTTPError as e:
             if e.code == 500:
                 raise ShotgunError("Server encountered an internal error. "
                     "\n%s\n(%s)\n%s\n\n" % (url, self._sanitize_auth_params(params), e))
@@ -1458,7 +1468,7 @@ class Shotgun(object):
         # Perform the request
         try:
             result = opener.open(url, params).read()
-        except urllib2.HTTPError, e:
+        except urllib2.HTTPError as e:
             if e.code == 500:
                 raise ShotgunError("Server encountered an internal error. "
                     "\n%s\n(%s)\n%s\n\n" % (url, self._sanitize_auth_params(params), e))
@@ -1694,7 +1704,7 @@ class Shotgun(object):
 
 
 
-def note_thread_read(self, note_id, entity_fields=None):
+    def note_thread_read(self, note_id, entity_fields=None):
         """Returns the full conversation for a given note, including 
         replies and attachments.
         
@@ -1769,7 +1779,7 @@ def note_thread_read(self, note_id, entity_fields=None):
 
 
 
-def text_search(self, text, entity_types, project_ids=None, limit=None):
+    def text_search(self, text, entity_types, project_ids=None, limit=None):
         """Searches across the specified entity types for the given text.
         
         This method can be used to implement auto completion or a Shotgun 
@@ -1856,9 +1866,7 @@ def text_search(self, text, entity_types, project_ids=None, limit=None):
         result = self._parse_records(record)[0]
         return result
 
-
-
-def activity_stream_read(self, entity_type, entity_id, entity_fields=None, 
+    def activity_stream_read(self, entity_type, entity_id, entity_fields=None, 
                              min_id=None, max_id=None, limit=None):
         """Retrieves activity stream data from Shotgun.
         
@@ -1941,8 +1949,6 @@ def activity_stream_read(self, entity_type, entity_id, entity_fields=None,
         record = self._call_rpc("activity_stream", params)
         result = self._parse_records(record)[0]
         return result
-
-
 
     def get_session_token(self):
         """Get the session token associated with the current session.
@@ -2081,7 +2087,7 @@ def activity_stream_read(self, entity_type, entity_id, entity_fields=None,
 
         return auth_params
     
-     def _sanitize_auth_params(self, params):
+    def _sanitize_auth_params(self, params):
         """
         Given an authentication parameter dictionary, sanitize any sensitive
         information and return the sanitized dict copy.
@@ -2143,7 +2149,7 @@ def activity_stream_read(self, entity_type, entity_id, entity_fields=None,
             attempt += 1
             try:
                 return self._http_request(verb, path, body, req_headers)
-            except SSLHandshakeError, e:
+            except SSLHandshakeError as e:
                 # Test whether the exception is due to the fact that this is an older version of
                 # Python that cannot validate certificates encrypted with SHA-2. If it is, then 
                 # fall back on disabling the certificate validation and try again - unless the
