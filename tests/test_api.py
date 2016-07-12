@@ -5,14 +5,19 @@ test_api_long for other tests.
 """
 
 import datetime
+import sys
 import os
 import re
 from mock import patch, Mock, MagicMock
+import time
+import uuid
 import unittest
 import urlparse
+import urllib2
+import warnings
 
 import shotgun_api3
-from shotgun_api3.lib.httplib2 import Http
+from shotgun_api3.lib.httplib2 import Http, SSLHandshakeError
 
 import base
 
@@ -126,7 +131,7 @@ class TestShotgunApi(base.LiveTestBase):
     def test_get_session_token(self):
         """Got session UUID"""
         #TODO test results
-        rv = self.sg._get_session_token()
+        rv = self.sg.get_session_token()
         self.assertTrue(rv)
 
     def test_upload_download(self):
@@ -164,7 +169,7 @@ class TestShotgunApi(base.LiveTestBase):
         file_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "sg_logo_download.jpg")
         result = self.sg.download_attachment(attach_id, file_path=file_path)
         self.assertEqual(result, file_path)
-    	# On windows read may not read to end of file unless opened 'rb'
+        # On windows read may not read to end of file unless opened 'rb'
         fp = open(file_path, 'rb')
         attach_file = fp.read()
         fp.close()
@@ -192,11 +197,11 @@ class TestShotgunApi(base.LiveTestBase):
 
         # test invalid requests
         INVALID_S3_URL = "https://sg-media-usor-01.s3.amazonaws.com/ada3de3ee3873875e1dd44f2eb0882c75ae36a4a/cd31346421dbeef781e0e480f259a3d36652d7f2/IMG_0465.MOV?AWSAccessKeyId=AKIAIQGOBSVN3FSQ5QFA&Expires=1371789959&Signature=SLbzv7DuVlZ8XAoOSQQAiGpF3u8%3D"
-        self.assertRaises(shotgun_api3.ShotgunFileDownloadError, 
+        self.assertRaises(shotgun_api3.ShotgunFileDownloadError,
                             self.sg.download_attachment,
                             {"url": INVALID_S3_URL})
         INVALID_ATTACHMENT_ID = 99999999
-        self.assertRaises(shotgun_api3.ShotgunFileDownloadError, 
+        self.assertRaises(shotgun_api3.ShotgunFileDownloadError,
                             self.sg.download_attachment,
                             INVALID_ATTACHMENT_ID)
         self.assertRaises(TypeError, self.sg.download_attachment,
@@ -315,6 +320,18 @@ class TestShotgunApi(base.LiveTestBase):
         expected_clear_thumbnail = {'id': self.version['id'], 'image': None, 'type': 'Version'}
         self.assertEqual(expected_clear_thumbnail, response_clear_thumbnail)
 
+    def test_upload_thumbnail_with_upload_function(self):
+        """Upload thumbnail via upload function test"""
+        path = os.path.abspath(os.path.expanduser(os.path.join(os.path.dirname(__file__), "sg_logo.jpg")))
+
+        # upload thumbnail
+        thumb_id = self.sg.upload("Task", self.task['id'], path, 'image')
+        self.assertTrue(isinstance(thumb_id, int))
+
+        #upload filmstrip thumbnail
+        f_thumb_id = self.sg.upload("Task", self.task['id'], path, 'filmstrip_image')
+        self.assertTrue(isinstance(f_thumb_id, int))
+
     def test_linked_thumbnail_url(self):
         this_dir, _ = os.path.split(__file__)
         path = os.path.abspath(os.path.expanduser(
@@ -424,7 +441,7 @@ class TestShotgunApi(base.LiveTestBase):
 
 
     def test_simple_summary(self):
-        '''test_simple_summary tests simple query using summarize.'''
+        """Test simple call to summarize"""
         summaries = [{'field': 'id', 'type': 'count'}]
         grouping = [{'direction': 'asc', 'field': 'id', 'type': 'exact'}]
         filters = [['project', 'is', self.project]]
@@ -439,6 +456,7 @@ class TestShotgunApi(base.LiveTestBase):
         assert(result['summaries'])
 
     def test_summary_include_archived_projects(self):
+        """Test summarize with archived project"""
         if self.sg.server_caps.version > (5, 3, 13):
             # archive project
             self.sg.update('Project', self.project['id'], {'archived':True})
@@ -455,32 +473,54 @@ class TestShotgunApi(base.LiveTestBase):
             self.sg.update('Project', self.project['id'], {'archived':False})
 
     def test_summary_values(self):
-        ''''''
-        # try to fix data if not in expected state
-        shots = self.sg.find('Shot',[['project','is',self.project],['code','in',['shot 1','shot 2','shot 3']]])
-        print len(shots)
-        for shot in shots:
-            # These shots should have been deleted,if they still exist it is due to an failure in mid-test
-            self.sg.delete('Shot', shot['id'])
+        """Test summarize return data"""
 
+        # create three unique shots
+        shot_prefix = uuid.uuid4().hex
 
-        shot_data = {
-            'sg_status_list': 'ip',
-            'sg_cut_duration': 100,
-            'project': self.project
-        }
         shots = []
-        shots.append(self.sg.create('Shot', dict(shot_data.items() +
-                                    {'code': 'shot 1'}.items())))
-        shots.append(self.sg.create('Shot', dict(shot_data.items() +
-                                    {'code': 'shot 2'}.items())))
-        shots.append(self.sg.create('Shot', dict(shot_data.items() +
-                                    {'code': 'shot 3',
-                                     'sg_status_list': 'fin'}.items())))
+
+        shot_data_1 = {
+            "code": "%s Shot 1" % shot_prefix,
+            "sg_status_list": "ip",
+            "sg_cut_duration": 100,
+            "project": self.project
+        }
+
+        shot_data_2 = {
+            "code": "%s Shot 2" % shot_prefix,
+            "sg_status_list": "ip",
+            "sg_cut_duration": 100,
+            "project": self.project
+        }
+
+        shot_data_3 = {
+            "code": "%s Shot 3" % shot_prefix,
+            "sg_status_list": "fin",
+            "sg_cut_duration": 100,
+            "project": self.project
+        }
+
+        shot_data_4 = {
+            "code": "%s Shot 4" % shot_prefix,
+            "sg_status_list": "wtg",
+            "sg_cut_duration": 0,
+            "project": self.project
+        }
+
+        shots.append(self.sg.create("Shot", shot_data_1))
+        shots.append(self.sg.create("Shot", shot_data_2))
+        shots.append(self.sg.create("Shot", shot_data_3))
+        shots.append(self.sg.create("Shot", shot_data_4))
+
+
         summaries = [{'field': 'id', 'type': 'count'},
                      {'field': 'sg_cut_duration', 'type': 'sum'}]
-        grouping = [{'direction': 'asc', 'field': 'sg_status_list', 'type': 'exact'}]
-        filters = [['project', 'is', self.project]]
+        grouping = [{'direction': 'asc',
+                     'field': 'sg_status_list',
+                     'type': 'exact'}]
+        filters = [['project', 'is', self.project],
+                   ['code', 'starts_with', shot_prefix]]
         result = self.sg.summarize('Shot',
                                    filters=filters,
                                    summary_fields=summaries,
@@ -508,7 +548,7 @@ class TestShotgunApi(base.LiveTestBase):
         for s in shots:
             batch_data.append({"request_type": "delete",
                                "entity_type": "Shot",
-                               "entity_id": s['id']
+                               "entity_id": s["id"]
                               })
         self.sg.batch(batch_data)
 
@@ -600,7 +640,7 @@ class TestDataTypes(base.LiveTestBase):
     '''Test fields representing the different data types mapped on the server side.
 
      Untested data types:  password, percent, pivot_column, serializable, image, currency
-                           multi_entity, system_task_type, timecode, url, uuid, url_template
+                           system_task_type, timecode, url, uuid, url_template
     '''
     def setUp(self):
         super(TestDataTypes, self).setUp()
@@ -700,6 +740,61 @@ class TestDataTypes(base.LiveTestBase):
         self.assertEqual(expected, actual)
 
 
+    def test_set_multi_entity(self):
+        sg = shotgun_api3.Shotgun( self.config.server_url,
+                                   self.config.script_name,
+                                   self.config.api_key )
+        keys = ['project','user','code']
+        data = {'project':self.project,
+                'user':self.human_user,
+                'code':'Alpha'}
+        version_1 = base._find_or_create_entity(sg, 'Version', data, keys)
+        data = {'project':self.project,
+                'user':self.human_user,
+                'code':'Beta'}
+        version_2 = base._find_or_create_entity(sg, 'Version', data, keys)
+
+        entity = 'Playlist'
+        entity_id = self.playlist['id']
+        field_name = 'versions'
+
+        # Default set behaviour
+        pos_values = [[version_1, version_2]]
+        expected, actual = self.assert_set_field(entity, entity_id,
+            field_name, pos_values)
+        self.assertEqual(len(expected), len(actual))
+        self.assertEqual(
+            sorted([x['id'] for x in expected]),
+            sorted([x['id'] for x in actual])
+        )
+
+        # Multi-entity remove mode
+        pos_values = [[version_1]]
+        expected, actual = self.assert_set_field(entity, entity_id,
+            field_name, pos_values, multi_entity_update_mode='remove')
+        self.assertEqual(1, len(actual))
+        self.assertEqual(len(expected), len(actual))
+        self.assertNotEqual(expected[0]['id'],actual[0]['id'])
+        self.assertEqual(version_2['id'], actual[0]['id'])
+
+        # Multi-entity add mode
+        pos_values = [[version_1]]
+        expected, actual = self.assert_set_field(entity, entity_id,
+            field_name, pos_values, multi_entity_update_mode='add')
+        self.assertEqual(2, len(actual))
+        self.assertTrue(version_1['id'] in [x['id'] for x in actual])
+
+        # Multi-entity set mode
+        pos_values = [[version_1, version_2]]
+        expected, actual = self.assert_set_field(entity, entity_id,
+            field_name, pos_values, multi_entity_update_mode='set')
+        self.assertEqual(len(expected), len(actual))
+        self.assertEqual(
+            sorted([x['id'] for x in expected]),
+            sorted([x['id'] for x in actual])
+        )
+
+
     def test_set_number(self):
         entity = 'Shot'
         entity_id = self.shot['id']
@@ -766,13 +861,17 @@ class TestDataTypes(base.LiveTestBase):
                                                  pos_values)
         self.assertEqual(expected, actual)
 
-    def assert_set_field(self, entity, entity_id, field_name, pos_values):
+    def assert_set_field(self, entity, entity_id, field_name, pos_values, multi_entity_update_mode=None):
         query_result = self.sg.find_one(entity,
                                          [['id', 'is', entity_id]],
                                          [field_name])
         initial_value = query_result[field_name]
         new_value = (initial_value == pos_values[0] and pos_values[1]) or pos_values[0]
-        self.sg.update(entity, entity_id, {field_name:new_value})
+        if multi_entity_update_mode:
+            self.sg.update(entity, entity_id, {field_name:new_value},
+                multi_entity_update_modes={field_name:multi_entity_update_mode})
+        else:
+            self.sg.update(entity, entity_id, {field_name:new_value})
         new_values = self.sg.find_one(entity,
                                      [['id', 'is', entity_id]],
                                      [field_name])
@@ -1350,7 +1449,7 @@ class TestFind(base.LiveTestBase):
             result = self.sg.find_one('Shot', [['id','is',self.shot['id']]])
             self.assertEquals(self.shot['id'], result['id'])
 
-            # archive project 
+            # archive project
             self.sg.update('Project', self.project['id'], {'archived':True})
 
             # setting defaults to True, so we should get result
@@ -1370,7 +1469,7 @@ class TestFollow(base.LiveTestBase):
 
     def test_follow(self):
         '''Test follow method'''
-        
+
         if not self.sg.server_caps.version or self.sg.server_caps.version < (5, 1, 22):
             return
 
@@ -1379,22 +1478,22 @@ class TestFollow(base.LiveTestBase):
 
     def test_unfollow(self):
         '''Test unfollow method'''
-        
+
         if not self.sg.server_caps.version or self.sg.server_caps.version < (5, 1, 22):
             return
-        
+
         result = self.sg.unfollow(self.human_user, self.shot)
         assert(result['unfollowed'])
-    
+
     def test_followers(self):
         '''Test followers method'''
-        
+
         if not self.sg.server_caps.version or self.sg.server_caps.version < (5, 1, 22):
             return
-        
+
         result = self.sg.follow(self.human_user, self.shot)
         assert(result['followed'])
-        
+
         result = self.sg.followers(self.shot)
         self.assertEqual( 1, len(result) )
         self.assertEqual( self.human_user['id'], result[0]['id'] )
@@ -1407,6 +1506,7 @@ class TestErrors(base.TestBase):
         api_key = self.config.api_key
         login = self.config.human_login
         password = self.config.human_password
+        auth_token = "111111"
 
         # Test various combinations of illegal arguments
         self.assertRaises(ValueError, shotgun_api3.Shotgun, server_url)
@@ -1416,18 +1516,24 @@ class TestErrors(base.TestBase):
         self.assertRaises(ValueError, shotgun_api3.Shotgun, server_url, login=login)
         self.assertRaises(ValueError, shotgun_api3.Shotgun, server_url, password=password)
         self.assertRaises(ValueError, shotgun_api3.Shotgun, server_url, script_name, login=login, password=password)
+        self.assertRaises(ValueError, shotgun_api3.Shotgun, server_url, login=login, auth_token=auth_token)
+        self.assertRaises(ValueError, shotgun_api3.Shotgun, server_url, password=password, auth_token=auth_token)
+        self.assertRaises(ValueError, shotgun_api3.Shotgun, server_url, script_name, login=login,
+                          password=password, auth_token=auth_token)
+        self.assertRaises(ValueError, shotgun_api3.Shotgun, server_url, api_key=api_key, login=login,
+                          password=password, auth_token=auth_token)
 
         # Test failed authentications
         sg = shotgun_api3.Shotgun(server_url, script_name, api_key)
-        self.assertRaises(shotgun_api3.Fault, sg.find_one, 'Shot',[])
+        self.assertRaises(shotgun_api3.AuthenticationFault, sg.find_one, 'Shot',[])
 
         script_name = self.config.script_name
         api_key = 'notrealapikey'
         sg = shotgun_api3.Shotgun(server_url, script_name, api_key)
-        self.assertRaises(shotgun_api3.Fault, sg.find_one, 'Shot',[])
+        self.assertRaises(shotgun_api3.AuthenticationFault, sg.find_one, 'Shot',[])
 
         sg = shotgun_api3.Shotgun(server_url, login=login, password='not a real password')
-        self.assertRaises(shotgun_api3.Fault, sg.find_one, 'Shot',[])
+        self.assertRaises(shotgun_api3.AuthenticationFault, sg.find_one, 'Shot',[])
 
     @patch('shotgun_api3.shotgun.Http.request')
     def test_status_not_200(self, mock_request):
@@ -1437,6 +1543,92 @@ class TestErrors(base.TestBase):
         mock_request.return_value = (response, {})
         self.assertRaises(shotgun_api3.ProtocolError, self.sg.find_one, 'Shot', [])
 
+    @patch('shotgun_api3.shotgun.Http.request')
+    def test_sha2_error(self, mock_request):
+        # Simulate the SSLHandshakeError raised with SHA-2 errors
+        mock_request.side_effect = SSLHandshakeError("[Errno 1] _ssl.c:480: error:0D0C50A1:asn1 "
+                                    "encoding routines:ASN1_item_verify: unknown message digest "
+                                    "algorithm")
+
+        # save the original state
+        original_env_val = os.environ.pop("SHOTGUN_FORCE_CERTIFICATE_VALIDATION", None)
+
+        # ensure we're starting with the right values
+        self.sg.reset_user_agent()
+
+        # ensure the initial settings are correct. These will be different depending on whether
+        # the ssl module imported successfully or not.
+        if "ssl" in sys.modules:
+            self.assertFalse(self.sg.config.no_ssl_validation)
+            self.assertFalse(shotgun_api3.shotgun.NO_SSL_VALIDATION)
+            self.assertTrue("(validate)" in " ".join(self.sg._user_agents))
+            self.assertFalse("(no-validate)" in " ".join(self.sg._user_agents))
+        else:
+            self.assertTrue(self.sg.config.no_ssl_validation)
+            self.assertTrue(shotgun_api3.shotgun.NO_SSL_VALIDATION)
+            self.assertFalse("(validate)" in " ".join(self.sg._user_agents))
+            self.assertTrue("(no-validate)" in " ".join(self.sg._user_agents))
+
+        try:
+            result = self.sg.info()
+        except SSLHandshakeError:
+            # ensure the api has reset the values in the correct fallback behavior
+            self.assertTrue(self.sg.config.no_ssl_validation)
+            self.assertTrue(shotgun_api3.shotgun.NO_SSL_VALIDATION)
+            self.assertFalse("(validate)" in " ".join(self.sg._user_agents))
+            self.assertTrue("(no-validate)" in " ".join(self.sg._user_agents))
+
+        if original_env_val is not None:
+            os.environ["SHOTGUN_FORCE_CERTIFICATE_VALIDATION"] = original_env_val
+
+    @patch('shotgun_api3.shotgun.Http.request')
+    def test_sha2_error_with_strict(self, mock_request):
+        # Simulate the SSLHandshakeError raised with SHA-2 errors
+        mock_request.side_effect = SSLHandshakeError("[Errno 1] _ssl.c:480: error:0D0C50A1:asn1 "
+                                    "encoding routines:ASN1_item_verify: unknown message digest "
+                                    "algorithm")
+
+        # save the original state
+        original_env_val = os.environ.pop("SHOTGUN_FORCE_CERTIFICATE_VALIDATION", None)
+        os.environ["SHOTGUN_FORCE_CERTIFICATE_VALIDATION"] = "1"
+
+        # ensure we're starting with the right values
+        self.sg.config.no_ssl_validation = False
+        shotgun_api3.shotgun.NO_SSL_VALIDATION = False
+        self.sg.reset_user_agent()
+
+        try:
+            result = self.sg.info()
+        except SSLHandshakeError:
+            # ensure the api has NOT reset the values in the fallback behavior because we have
+            # set the env variable to force validation
+            self.assertFalse(self.sg.config.no_ssl_validation)
+            self.assertFalse(shotgun_api3.shotgun.NO_SSL_VALIDATION)
+            self.assertFalse("(no-validate)" in " ".join(self.sg._user_agents))
+            self.assertTrue("(validate)" in " ".join(self.sg._user_agents))
+
+        if original_env_val is not None:
+            os.environ["SHOTGUN_FORCE_CERTIFICATE_VALIDATION"] = original_env_val
+
+    @patch.object(urllib2.OpenerDirector, 'open')
+    def test_sanitized_auth_params(self, mock_open):
+        # Simulate the server blowing up and giving us a 500 error
+        mock_open.side_effect = urllib2.HTTPError('url', 500, 'message', {}, None)
+
+        this_dir, _ = os.path.split(__file__)
+        thumbnail_path = os.path.abspath(os.path.join(this_dir, "sg_logo.jpg"))
+
+        try:
+            # Try to upload a bogus file
+            self.sg.upload('Note', 1234, thumbnail_path)
+        except shotgun_api3.ShotgunError, e:
+            self.assertFalse(self.api_key in str(e))
+            return
+
+        # You should never get here... Otherwise some mocking failed and the
+        # except above wasn't properly run
+        self.assertTrue(False)
+
 #    def test_malformed_response(self):
 #        #TODO ResponseError
 #        pass
@@ -1445,12 +1637,12 @@ class TestErrors(base.TestBase):
 class TestScriptUserSudoAuth(base.LiveTestBase):
     def setUp(self):
         super(TestScriptUserSudoAuth, self).setUp('ApiUser')
-    
+
     def test_user_is_creator(self):
         """
         Test 'sudo_as_login' option: on create, ensure appropriate user is set in created-by
         """
-        
+
         if not self.sg.server_caps.version or self.sg.server_caps.version < (5, 3, 12):
             return
 
@@ -1459,7 +1651,7 @@ class TestScriptUserSudoAuth(base.LiveTestBase):
                     self.config.api_key,
                     http_proxy=self.config.http_proxy,
                     sudo_as_login=self.config.human_login )
-                    
+
         data = {
             'project': self.project,
             'code':'JohnnyApple_Design01_FaceFinal',
@@ -1478,7 +1670,7 @@ class TestScriptUserSudoAuth(base.LiveTestBase):
 class TestHumanUserSudoAuth(base.TestBase):
     def setUp(self):
         super(TestHumanUserSudoAuth, self).setUp('HumanUser')
-    
+
     def test_human_user_sudo_auth_fails(self):
         """
         Test 'sudo_as_login' option for HumanUser.
@@ -1494,18 +1686,23 @@ class TestHumanUserSudoAuth(base.TestBase):
                     http_proxy=self.config.http_proxy,
                     sudo_as_login="blah" )
         self.assertRaises(shotgun_api3.Fault, x.find_one, 'Shot', [])
+        expected = "The user does not have permission to 'sudo':"
         try :
             x.find_one('Shot',[])
         except shotgun_api3.Fault, e:
             # py24 exceptions don't have message attr
             if hasattr(e, 'message'):
-                self.assertEquals("The user does not have permission to 'sudo': ", e.message)
+                self.assert_(e.message.startswith(expected))
             else:
-                self.assertEquals("The user does not have permission to 'sudo': ", e.args[0])
+                self.assert_(e.args[0].startswith(expected))
 
 
 
 class TestHumanUserAuth(base.HumanUserAuthLiveTestBase):
+    """
+    Testing the username/password authentication method
+    """
+
     def test_humanuser_find(self):
         """Called find, find_one for known entities as human user"""
         filters = []
@@ -1558,20 +1755,701 @@ class TestHumanUserAuth(base.HumanUserAuthLiveTestBase):
         self.assertEqual(expected_clear_thumbnail, response_clear_thumbnail)
 
 
-def  _has_unicode(data):
+class TestSessionTokenAuth(base.SessionTokenAuthLiveTestBase):
+    """
+    Testing the session token based authentication method
+    """
+
+    def test_humanuser_find(self):
+        """Called find, find_one for known entities as session token based user"""
+
+        if self.sg.server_caps.version >= (5, 4, 1):
+
+            filters = []
+            filters.append(['project', 'is', self.project])
+            filters.append(['id', 'is', self.version['id']])
+
+            fields = ['id']
+
+            versions = self.sg.find("Version", filters, fields=fields)
+
+            self.assertTrue(isinstance(versions, list))
+            version = versions[0]
+            self.assertEqual("Version", version["type"])
+            self.assertEqual(self.version['id'], version["id"])
+
+            version = self.sg.find_one("Version", filters, fields=fields)
+            self.assertEqual("Version", version["type"])
+            self.assertEqual(self.version['id'], version["id"])
+
+    def test_humanuser_upload_thumbnail_for_version(self):
+        """simple upload thumbnail for version test as session based token user."""
+
+        if self.sg.server_caps.version >= (5, 4, 1):
+
+            this_dir, _ = os.path.split(__file__)
+            path = os.path.abspath(os.path.expanduser(
+                os.path.join(this_dir,"sg_logo.jpg")))
+            size = os.stat(path).st_size
+
+            # upload thumbnail
+            thumb_id = self.sg.upload_thumbnail("Version",
+                self.version['id'], path)
+            self.assertTrue(isinstance(thumb_id, int))
+
+            # check result on version
+            version_with_thumbnail = self.sg.find_one('Version',
+                [['id', 'is', self.version['id']]],
+                fields=['image'])
+
+            self.assertEqual(version_with_thumbnail.get('type'), 'Version')
+            self.assertEqual(version_with_thumbnail.get('id'), self.version['id'])
+
+
+            h = Http(".cache")
+            thumb_resp, content = h.request(version_with_thumbnail.get('image'), "GET")
+            self.assertEqual(thumb_resp['status'], '200')
+            self.assertEqual(thumb_resp['content-type'], 'image/jpeg')
+
+            # clear thumbnail
+            response_clear_thumbnail = self.sg.update("Version",
+                self.version['id'], {'image':None})
+            expected_clear_thumbnail = {'id': self.version['id'], 'image': None, 'type': 'Version'}
+            self.assertEqual(expected_clear_thumbnail, response_clear_thumbnail)
+
+
+class TestProjectLastAccessedByCurrentUser(base.LiveTestBase):
+    # Ticket #24681
+    def test_logged_in_user(self):
+        if self.sg.server_caps.version and self.sg.server_caps.version < (5, 3, 20):
+            return
+
+        sg = shotgun_api3.Shotgun(self.config.server_url,
+                    login=self.config.human_login,
+                    password=self.config.human_password,
+                    http_proxy=self.config.http_proxy)
+
+        initial = sg.find_one('Project', [['id','is',self.project['id']]], ['last_accessed_by_current_user'])
+
+        sg.update_project_last_accessed(self.project)
+
+        current =  sg.find_one('Project', [['id','is',self.project['id']]], ['last_accessed_by_current_user'])
+        self.assertNotEqual( initial, current )
+        # it's possible initial is None
+        if initial:
+            assert(initial['last_accessed_by_current_user'] < current['last_accessed_by_current_user'])
+
+
+    def test_pass_in_user(self):
+        if self.sg.server_caps.version and self.sg.server_caps.version < (5, 3, 20):
+            return
+
+        sg = shotgun_api3.Shotgun( self.config.server_url,
+                                   login=self.config.human_login,
+                                   password=self.config.human_password,
+                                   http_proxy=self.config.http_proxy )
+
+        initial = sg.find_one('Project', [['id','is',self.project['id']]], ['last_accessed_by_current_user'])
+        time.sleep(1)
+
+        # this instance of the api is not logged in as a user
+        self.sg.update_project_last_accessed(self.project, user=self.human_user)
+
+        current =  sg.find_one('Project', [['id','is',self.project['id']]], ['last_accessed_by_current_user'])
+        self.assertNotEqual( initial, current )
+        # it's possible initial is None
+        if initial:
+            assert(initial['last_accessed_by_current_user'] < current['last_accessed_by_current_user'])
+
+    def test_sudo_as_user(self):
+        if self.sg.server_caps.version and self.sg.server_caps.version < (5, 3, 20):
+            return
+
+        sg = shotgun_api3.Shotgun( self.config.server_url,
+                                   self.config.script_name,
+                                   self.config.api_key,
+                                   http_proxy=self.config.http_proxy,
+                                   sudo_as_login=self.config.human_login )
+
+        initial = sg.find_one('Project', [['id','is',self.project['id']]], ['last_accessed_by_current_user'])
+        time.sleep(1)
+
+        sg.update_project_last_accessed(self.project)
+
+        current =  sg.find_one('Project', [['id','is',self.project['id']]], ['last_accessed_by_current_user'])
+        self.assertNotEqual( initial, current )
+        # it's possible initial is None
+        if initial:
+            assert(initial['last_accessed_by_current_user'] < current['last_accessed_by_current_user'])
+
+
+class TestActivityStream(base.LiveTestBase):
+    """
+    Unit tests for the activity_stream_read() method
+    """
+
+    def setUp(self):
+        super(TestActivityStream, self).setUp()
+        self._prefix = uuid.uuid4().hex
+
+        self._shot = self.sg.create("Shot", {"code": "%s activity stream test" % self._prefix,
+                                             "project": self.project})
+
+        self._note = self.sg.create("Note", {"content": "Test!",
+                                             "project": self.project,
+                                             "note_links": [self._shot]})
+
+        # check that if the created_by is a script user, we want to ensure
+        # that event log generation is enabled for this user. If it has been
+        # disabled, these tests will fail because the activity stream is
+        # connected to events. In this case, print a warning to the user
+        d = self.sg.find_one("Shot",
+                             [["id", "is", self._shot["id"] ]],
+                             ["created_by.ApiUser.generate_event_log_entries"])
+
+        if d["created_by.ApiUser.generate_event_log_entries"] is False:
+            # events are turned off! warn the user
+            print("WARNING! Looks like the script user that is running these "
+                  "tests has got the generate event log entries setting set to "
+                  "off. This will cause the activity stream tests to fail. "
+                  "Please enable event log generation for the script user.")
+
+
+    def tearDown(self):
+        batch_data = []
+        batch_data.append({"request_type": "delete",
+                           "entity_type": self._note["type"],
+                           "entity_id": self._note["id"]
+                          })
+        batch_data.append({"request_type": "delete",
+                           "entity_type": self._shot["type"],
+                           "entity_id": self._shot["id"]
+                          })
+        self.sg.batch(batch_data)
+
+        super(TestActivityStream, self).tearDown()
+
+    def test_simple(self):
+        """
+        Test activity stream
+        """
+
+        if not self.sg.server_caps.version or self.sg.server_caps.version < (6, 2, 0):
+            return
+
+        result = self.sg.activity_stream_read(self._shot["type"],
+                                              self._shot["id"])
+
+        expected_keys = ["earliest_update_id",
+                         "entity_id",
+                         "entity_type",
+                         "latest_update_id",
+                         "updates"]
+
+        self.assertEqual(set(expected_keys), set(result.keys()))
+        self.assertEqual(len(result["updates"]), 2)
+        self.assertEqual(result["entity_type"], "Shot")
+        self.assertEqual(result["entity_id"], self._shot["id"])
+
+
+    def test_limit(self):
+        """
+        Test limited activity stream
+        """
+
+        if not self.sg.server_caps.version or self.sg.server_caps.version < (6, 2, 0):
+            return
+
+        result = self.sg.activity_stream_read(self._shot["type"],
+                                              self._shot["id"],
+                                              limit=1)
+
+        self.assertEqual(len(result["updates"]), 1)
+        self.assertEqual(result["updates"][0]["update_type"], "create")
+        self.assertEqual(result["updates"][0]["meta"]["entity_type"], "Note")
+
+
+    def test_extra_fields(self):
+        """
+        Test additional fields for activity stream
+        """
+
+        if not self.sg.server_caps.version or self.sg.server_caps.version < (6, 2, 0):
+            return
+
+        result = self.sg.activity_stream_read(self._shot["type"],
+                                              self._shot["id"],
+                                              entity_fields={"Shot": ["created_by.HumanUser.image"],
+                                                             "Note": ["content"]})
+
+        self.assertEqual(len(result["updates"]), 2)
+        self.assertEqual(set(result["updates"][0]["primary_entity"].keys()),
+                         set(["content",
+                              "id",
+                              "name",
+                              "status",
+                              "type"]))
+
+        self.assertEqual(set(result["updates"][1]["primary_entity"].keys()),
+                         set(["created_by.HumanUser.image",
+                              "id",
+                              "name",
+                              "status",
+                              "type"]))
+
+class TestNoteThreadRead(base.LiveTestBase):
+    """
+    Unit tests for the note_thread_read method
+    """
+
+    def setUp(self):
+        super(TestNoteThreadRead, self).setUp()
+
+        # get path to our std attahcment
+        this_dir, _ = os.path.split(__file__)
+        self._thumbnail_path = os.path.abspath(os.path.join(this_dir, "sg_logo.jpg"))
+
+
+    def _check_note(self, data, note_id, additional_fields):
+
+        # check the expected fields
+        expected_fields = set(["content", "created_at", "created_by", "id", "type"] + additional_fields)
+
+        self.assertEqual(expected_fields, set(data.keys()))
+
+        # check that the data matches the data we get from a find call
+        note_data = self.sg.find_one("Note",
+                                     [["id", "is", note_id]],
+                                     list(expected_fields))
+        self.assertEqual(note_data, data)
+
+    def _check_reply(self, data, reply_id, additional_fields):
+
+        # check the expected fields
+        expected_fields = set(["content", "created_at", "user", "id", "type"] + additional_fields)
+        self.assertEqual(expected_fields, set(data.keys()))
+
+        # check that the data matches the data we get from a find call
+        reply_data = self.sg.find_one("Reply",
+                                     [["id", "is", reply_id]],
+                                     list(expected_fields))
+
+        # the reply stream adds an image to the user fields in order
+        # to include thumbnails for users, so remove this before we compare
+        # against the shotgun find data. The image is tested elsewhere.
+        del data["user"]["image"]
+
+        self.assertEqual(reply_data, data)
+
+    def _check_attachment(self, data, attachment_id, additional_fields):
+
+
+
+
+        # check the expected fields
+        expected_fields = set(["created_at", "created_by", "id", "type"] + additional_fields)
+        self.assertEqual(expected_fields, set(data.keys()))
+
+        # check that the data matches the data we get from a find call
+        attachment_data = self.sg.find_one("Attachment",
+                                           [["id", "is", attachment_id]],
+                                           list(expected_fields))
+
+        self.assertEqual(attachment_data, data)
+
+    def test_simple(self):
+        """
+        Test note reply thread API call
+        """
+        if not self.sg.server_caps.version or self.sg.server_caps.version < (6, 2, 0):
+            return
+
+        # create note
+        note = self.sg.create( "Note", {"content": "Test!", "project": self.project})
+
+        # for this test, we check that the replies returned also
+        # contain the thumbnail associated with the user doing the
+        # reply. For this, make sure that there is a thumbnail
+        # associated with the current user
+
+        d = self.sg.find_one("Note",
+                             [["id", "is", note["id"]]],
+                             ["created_by", "created_by.ApiUser.image"])
+
+        current_thumbnail = d["created_by.ApiUser.image"]
+
+        if current_thumbnail is None:
+            # upload thumbnail
+            self.sg.upload_thumbnail("ApiUser",
+                                     d["created_by"]["id"],
+                                     self._thumbnail_path)
+
+            d = self.sg.find_one("Note",
+                                 [["id", "is", note["id"]]],
+                                 ["created_by", "created_by.ApiUser.image"])
+
+            current_thumbnail = d["created_by.ApiUser.image"]
+
+        # get thread
+        result = self.sg.note_thread_read(note["id"])
+        self.assertEqual(len(result), 1)
+        self._check_note(result[0], note["id"], additional_fields=[])
+
+        # now add a reply
+        reply = self.sg.create( "Reply", {"content": "Reply Content", "entity": note})
+
+        # get thread
+        result = self.sg.note_thread_read(note["id"])
+        self.assertEqual(len(result), 2)
+
+        # now check that the reply thumbnail field matches
+        # the uploaded thumbnail. strip off any s3 querystring
+        # for the comparison
+        reply_thumb = result[1]["user"]["image"]
+        url_obj_a = urlparse.urlparse(current_thumbnail)
+        url_obj_b = urlparse.urlparse(reply_thumb)
+        self.assertEqual("%s/%s" % (url_obj_a.netloc, url_obj_a.path),
+                         "%s/%s" % (url_obj_b.netloc, url_obj_b.path),)
+
+        # and check ther rest of the data
+        self._check_note(result[0], note["id"], additional_fields=[])
+        self._check_reply(result[1], reply["id"], additional_fields=[])
+
+        # now upload an attachment
+        attachment_id = self.sg.upload(note["type"], note["id"], self._thumbnail_path)
+
+        # get thread
+        result = self.sg.note_thread_read(note["id"])
+        self.assertEqual(len(result), 3)
+        self._check_note(result[0], note["id"], additional_fields=[])
+        self._check_reply(result[1], reply["id"], additional_fields=[])
+        self._check_attachment(result[2], attachment_id, additional_fields=[])
+
+    def test_complex(self):
+        """
+        Test note reply thread API call with additional params
+        """
+
+        if not self.sg.server_caps.version or self.sg.server_caps.version < (6, 2, 0):
+            return
+
+        additional_fields = {
+              "Note":       ["created_by.HumanUser.image",
+                             "addressings_to",
+                             "playlist",
+                             "user" ],
+              "Reply":      ["content"],
+              "Attachment": ["this_file"]
+            }
+
+        # create note
+        note = self.sg.create( "Note", {"content": "Test!",
+                                        "project": self.project,
+                                        "addressings_to": [self.human_user]})
+
+        # get thread
+        result = self.sg.note_thread_read(note["id"], additional_fields)
+
+        self.assertEqual(len(result), 1)
+        self._check_note(result[0], note["id"], additional_fields["Note"])
+
+        # now add a reply
+        reply = self.sg.create( "Reply", {"content": "Reply Content", "entity": note})
+
+        # get thread
+        result = self.sg.note_thread_read(note["id"], additional_fields)
+        self.assertEqual(len(result), 2)
+        self._check_note(result[0], note["id"], additional_fields["Note"])
+        self._check_reply(result[1], reply["id"], additional_fields["Reply"])
+
+        # now upload an attachment
+        attachment_id = self.sg.upload(note["type"], note["id"], self._thumbnail_path)
+
+        # get thread
+        result = self.sg.note_thread_read(note["id"], additional_fields)
+        self.assertEqual(len(result), 3)
+        self._check_note(result[0], note["id"], additional_fields["Note"])
+        self._check_reply(result[1], reply["id"], additional_fields["Reply"])
+
+        self._check_attachment(result[2], attachment_id, additional_fields["Attachment"])
+
+class TestTextSearch(base.LiveTestBase):
+    """
+    Unit tests for the text_search() method
+    """
+
+    def setUp(self):
+        super(TestTextSearch, self).setUp()
+
+        # create 5 shots and 5 assets to search for
+        self._prefix = uuid.uuid4().hex
+
+        batch_data = []
+        for i in range(5):
+            data = { "code":"%s Text Search %s" % (self._prefix, i),
+                     "project": self.project }
+            batch_data.append( {"request_type": "create",
+                                "entity_type": "Shot",
+                                "data": data} )
+            batch_data.append( {"request_type": "create",
+                                "entity_type": "Asset",
+                                "data": data} )
+        data = self.sg.batch(batch_data)
+
+        self._shot_ids = [x["id"] for x in data if x["type"] == "Shot"]
+        self._asset_ids = [x["id"] for x in data if x["type"] == "Asset"]
+
+    def tearDown(self):
+
+        # clean up
+        batch_data = []
+        for shot_id in self._shot_ids:
+            batch_data.append({"request_type": "delete",
+                               "entity_type": "Shot",
+                               "entity_id": shot_id
+                              })
+        for asset_id in self._asset_ids:
+            batch_data.append({"request_type": "delete",
+                               "entity_type": "Asset",
+                               "entity_id": asset_id
+                              })
+        self.sg.batch(batch_data)
+
+        super(TestTextSearch, self).tearDown()
+
+    def test_simple(self):
+        """
+        Test basic global search
+        """
+        if not self.sg.server_caps.version or self.sg.server_caps.version < (6, 2, 0):
+            return
+
+        result = self.sg.text_search("%s Text Search" % self._prefix, {"Shot" : [] } )
+
+        self.assertEqual(set(["matches", "terms"]), set(result.keys()))
+        self.assertEqual(result["terms"], [self._prefix, "text", "search"])
+        matches = result["matches"]
+        self.assertEqual(len(matches), 5)
+
+        for match in matches:
+            self.assertTrue(match["id"] in self._shot_ids)
+            self.assertEqual(match["type"], "Shot")
+            self.assertEqual(match["project_id"], self.project["id"])
+            self.assertEqual(match["image"], None)
+
+    def test_limit(self):
+        """
+        Test limited global search
+        """
+        if not self.sg.server_caps.version or self.sg.server_caps.version < (6, 2, 0):
+            return
+
+        result = self.sg.text_search("%s Text Search" % self._prefix, {"Shot" : [] }, limit=3 )
+        matches = result["matches"]
+        self.assertEqual(len(matches), 3)
+
+    def test_entity_filter(self):
+        """
+        Test basic multi-type global search
+        """
+        if not self.sg.server_caps.version or self.sg.server_caps.version < (6, 2, 0):
+            return
+
+        result = self.sg.text_search("%s Text Search" % self._prefix,
+                                     {"Shot": [], "Asset": [] } )
+
+        matches = result["matches"]
+
+        self.assertEqual(set(["matches", "terms"]), set(result.keys()))
+        self.assertEqual(len(matches), 10)
+
+
+    def test_complex_entity_filter(self):
+        """
+        Test complex multi-type global search
+        """
+        if not self.sg.server_caps.version or self.sg.server_caps.version < (6, 2, 0):
+            return
+
+        result = self.sg.text_search("%s Text Search" % self._prefix,
+                                     {"Shot": [["code", "ends_with", "3"]],
+                                      "Asset": [
+                                                {"filter_operator": "any",
+                                                 "filters": [["code", "ends_with", "4"]]
+                                                }
+                                                ]
+                                     })
+
+        matches = result["matches"]
+
+        self.assertEqual(set(["matches", "terms"]), set(result.keys()))
+        self.assertEqual(len(matches), 2)
+
+        self.assertEqual(matches[0]["type"], "Shot")
+        self.assertEqual(matches[0]["name"], "%s Text Search 3" % self._prefix)
+        self.assertEqual(matches[1]["type"], "Asset")
+        self.assertEqual(matches[1]["name"], "%s Text Search 4" % self._prefix)
+
+
+class TestReadAdditionalFilterPresets(base.LiveTestBase):
+    """
+    Unit tests for the additional_filter_presets read parameter
+    """
+
+    def test_simple_case(self):
+        if self.sg_version < (7, 0, 0):
+            warnings.warn("Test bypassed because SG server used does not support this feature.", FutureWarning)
+            return
+
+        filters = [
+            ["project", "is", self.project],
+            ["id", "is", self.version["id"]]
+        ]
+
+        fields = ["id"]
+
+        additional_filters = [{"preset_name": "LATEST", "latest_by": "ENTITIES_CREATED_AT"}]
+
+        versions = self.sg.find("Version", filters, fields=fields, additional_filter_presets=additional_filters)
+        version = versions[0]
+        self.assertEqual("Version", version["type"])
+        self.assertEqual(self.version["id"], version["id"])
+
+
+    def test_find_one(self):
+        if self.sg_version < (7, 0, 0):
+            warnings.warn("Test bypassed because SG server used does not support this feature.", FutureWarning)
+            return
+
+        filters = [
+            ["project", "is", self.project],
+            ["id", "is", self.version["id"]]
+        ]
+
+        fields = ["id"]
+
+        additional_filters = [{"preset_name": "LATEST", "latest_by": "ENTITIES_CREATED_AT"}]
+
+        version = self.sg.find_one("Version", filters, fields=fields, additional_filter_presets=additional_filters)
+        self.assertEqual("Version", version["type"])
+        self.assertEqual(self.version["id"], version["id"])
+
+    def test_filter_with_no_name(self):
+        if self.sg_version < (7, 0, 0):
+            warnings.warn("Test bypassed because SG server used does not support this feature.", FutureWarning)
+            return
+
+        filters = [
+            ["project", "is", self.project],
+            ["id", "is", self.version["id"]]
+        ]
+
+        fields = ["id"]
+
+        additional_filters = [{}]
+
+        self.assertRaises(shotgun_api3.Fault,
+                          self.sg.find,
+                          "Version", filters, fields=fields, additional_filter_presets=additional_filters)
+
+    def test_invalid_filter(self):
+        if self.sg_version < (7, 0, 0):
+            warnings.warn("Test bypassed because SG server used does not support this feature.", FutureWarning)
+            return
+
+
+        filters = [
+            ["project", "is", self.project],
+            ["id", "is", self.version["id"]]
+        ]
+
+        fields = ["id"]
+
+        additional_filters = [{"preset_name" : "BAD_FILTER"}]
+
+        self.assertRaises(shotgun_api3.Fault,
+                          self.sg.find,
+                          "Version", filters, fields=fields, additional_filter_presets=additional_filters)
+
+    def test_filter_not_iterable(self):
+        if self.sg_version < (7, 0, 0):
+            warnings.warn("Test bypassed because SG server used does not support this feature.", FutureWarning)
+            return
+
+        filters = [
+            ["project", "is", self.project],
+            ["id", "is", self.version["id"]]
+        ]
+
+        fields = ["id"]
+
+        additional_filters = 3
+
+        self.assertRaises(shotgun_api3.Fault,
+                          self.sg.find,
+                          "Version", filters, fields=fields, additional_filter_presets=additional_filters)
+
+
+    def test_filter_not_list_of_iterable(self):
+        if self.sg_version < (7, 0, 0):
+            warnings.warn("Test bypassed because SG server used does not support this feature.", FutureWarning)
+            return
+
+        filters = [
+            ["project", "is", self.project],
+            ["id", "is", self.version["id"]]
+        ]
+
+        fields = ["id"]
+
+        additional_filters = [3]
+
+        self.assertRaises(shotgun_api3.Fault,
+                          self.sg.find,
+                          "Version", filters, fields=fields, additional_filter_presets=additional_filters)
+
+
+    def test_multiple_latest_filters(self):
+        if self.sg_version < (7, 0, 0):
+            warnings.warn("Test bypassed because SG server used does not support this feature.", FutureWarning)
+            return
+
+        filters = [
+            ["project", "is", self.project],
+            ["id", "is", self.version["id"]]
+        ]
+
+        fields = ["id"]
+
+        additional_filters = ({"preset_name": "LATEST", "latest_by": "ENTITY_CREATED_AT"},
+                              {"preset_name": "LATEST", "latest_by": "PIPELINE_STEP_NUMBER_AND_ENTITIES_CREATED_AT"})
+
+        self.assertRaises(shotgun_api3.Fault,
+                          self.sg.find,
+                          "Version", filters, fields=fields, additional_filter_presets=additional_filters)
+
+
+def _has_unicode(data):
     for k, v in data.items():
-        if (isinstance(k, unicode)):
+        if isinstance(k, unicode):
             return True
-        if (isinstance(v, unicode)):
+        if isinstance(v, unicode):
             return True
     return False
 
+
 def _get_path(url):
+    """Returns path component of a url without the sheme, host, query, anchor, or any other
+    additional elements. 
+    For example, the url "https://foo.shotgunstudio.com/page/2128#Shot_1190_sr10101_034"
+    returns "/page/2128"
+    """
     # url_parse returns native objects for older python versions (2.4)
     if isinstance(url, dict):
         return url.get('path')
     elif isinstance(url, tuple):
-        return os.path.join(url[:4])
+        # 3rd component is the path
+        return url[2]
     else:
         return url.path
 

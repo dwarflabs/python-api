@@ -1,4 +1,5 @@
 """Base class for Shotgun API tests."""
+import os
 import re
 import unittest
 from ConfigParser import ConfigParser
@@ -25,11 +26,13 @@ class TestBase(unittest.TestCase):
         self.asset          = None
         self.version        = None
         self.note           = None
+        self.playlist       = None
         self.task           = None
         self.ticket         = None
         self.human_password = None
         self.server_url     = None
         self.server_address = None
+        self.session_token  = None
         self.connect        = False
 
 
@@ -54,6 +57,19 @@ class TestBase(unittest.TestCase):
             self.sg = api.Shotgun(self.config.server_url,
                                   login=self.human_login,
                                   password=self.human_password,
+                                  http_proxy=self.config.http_proxy,
+                                  connect=self.connect )
+        elif auth_mode == 'SessionToken':
+            # first make an instance based on script key/name so 
+            # we can generate a session token
+            sg = api.Shotgun(self.config.server_url,
+                             self.config.script_name,
+                             self.config.api_key,
+                             http_proxy=self.config.http_proxy )
+            self.session_token = sg.get_session_token()
+            # now log in using session token
+            self.sg = api.Shotgun(self.config.server_url,
+                                  session_token=self.session_token,
                                   http_proxy=self.config.http_proxy,
                                   connect=self.connect )
         else:
@@ -165,9 +181,12 @@ class MockTestBase(TestBase):
         self.version    = { 'id':5,
                             'code':self.config.version_code,
                             'type':'Version' }
-        self.ticket    = { 'id':6,
+        self.ticket     = { 'id':6,
                             'title':self.config.ticket_title,
                             'type':'Ticket' }
+        self.playlist   = { 'id':7,
+                            'code':self.config.playlist_code,
+                            'type':'Playlist'}
 
 class LiveTestBase(TestBase):
     '''Test base for tests relying on connection to server.'''
@@ -221,6 +240,11 @@ class LiveTestBase(TestBase):
                 'content':'anything'}
         self.note = _find_or_create_entity(self.sg, 'Note', data, keys)
 
+        keys = ['code','project']
+        data = {'project':self.project,
+                'code':self.config.playlist_code}
+        self.playlist = _find_or_create_entity(self.sg, 'Playlist', data, keys)
+
         keys = ['code', 'entity_type']
         data = {'code': 'wrapper test step',
                 'entity_type': 'Shot'}
@@ -247,7 +271,6 @@ class LiveTestBase(TestBase):
                 'mac_path':'nowhere',
                 'windows_path':'nowhere',
                 'linux_path':'nowhere'}
-
         self.local_storage = _find_or_create_entity(self.sg, 'LocalStorage', data, keys)
 
 
@@ -259,33 +282,46 @@ class HumanUserAuthLiveTestBase(LiveTestBase):
     def setUp(self):
         super(HumanUserAuthLiveTestBase, self).setUp('HumanUser')
 
+class SessionTokenAuthLiveTestBase(LiveTestBase):
+    '''
+    Test base for relying on a Shotgun connection authenticate through the
+    configured session_token parameter.
+    '''
+    def setUp(self):
+        super(SessionTokenAuthLiveTestBase, self).setUp('SessionToken')
+
 
 class SgTestConfig(object):
     '''Reads test config and holds values'''
     def __init__(self):
-        self.mock           = True
-        self.server_url     = None
-        self.script_name    = None
-        self.api_key        = None
-        self.http_proxy     = None
-        self.session_uuid   = None
-        self.project_name   = None
-        self.human_name     = None
-        self.human_login    = None
-        self.human_password = None
-        self.asset_code     = None
-        self.version_code   = None
-        self.shot_code      = None
-        self.task_content   = None
 
+        for key in self.config_keys():
+
+            # Look for any environment variables that match our test
+            # configuration naming of "SG_{KEY}". Default is None.
+            value = os.environ.get('SG_%s' % (str(key).upper()))
+            if key in ['mock']:
+                value = (value == None) or (str(value).lower() in ['true','1'])
+            setattr(self, key, value)
+
+    def config_keys(self):
+        return [
+            'api_key', 'asset_code', 'http_proxy', 'human_login', 'human_name',
+            'human_password', 'mock', 'project_name', 'script_name', 
+            'server_url', 'session_uuid', 'shot_code', 'task_content', 
+            'version_code', 'playlist_code'
+        ]
 
     def read_config(self, config_path):
         config_parser = ConfigParser()
         config_parser.read(config_path)
         for section in config_parser.sections():
             for option in config_parser.options(section):
-                value = config_parser.get(section, option)
-                setattr(self, option, value)
+                # We only care about the configuration file if an environment
+                # variable has not already been set
+                if not getattr(self, option, None):
+                    value = config_parser.get(section, option)
+                    setattr(self, option, value)
 
 
 def _find_or_create_entity(sg, entity_type, data, identifyiers=None):
